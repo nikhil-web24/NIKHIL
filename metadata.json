@@ -1,0 +1,7 @@
+{
+  "name": "AI Interview Practice Hub",
+  "description": "An interactive AI-powered platform to practice technical interviews with voice support and detailed feedback.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
