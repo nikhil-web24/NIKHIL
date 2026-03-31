@@ -19,6 +19,7 @@ export interface PracticeHistory {
   score: number;
   total: number;
   language: string;
+  mode?: 'technical' | 'behavioral';
 }
 
 export type View = 'home' | 'login' | 'dashboard' | 'test' | 'result' | 'mistakes' | 'demo' | 'history';

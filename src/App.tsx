@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Mic, 
+  Search,
   MicOff, 
   ChevronRight, 
   Trophy, 
@@ -17,7 +18,9 @@ import {
   Volume2,
   Play,
   SkipForward,
-  Calendar
+  Calendar,
+  Sun,
+  Moon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from "@google/genai";
@@ -37,9 +40,25 @@ const QUESTIONS: Question[] = [
   { id: 5, q: "What is database?", correct: "data storage", explain: "Database stores data." }
 ];
 
+const BEHAVIORAL_QUESTIONS: Question[] = [
+  { id: 101, q: "Tell me about a time you had a conflict with a teammate. How did you resolve it?", correct: "conflict resolution", explain: "Focus on communication and compromise." },
+  { id: 102, q: "Describe a situation where you had to work under a tight deadline.", correct: "time management", explain: "Show how you prioritize and stay organized." },
+  { id: 103, q: "Give an example of a time you failed. What did you learn?", correct: "resilience", explain: "Be honest about the failure and emphasize the learning." },
+  { id: 104, q: "Tell me about a project you are most proud of.", correct: "achievement", explain: "Highlight your specific contribution and the impact." },
+  { id: 105, q: "How do you handle critical feedback?", correct: "growth mindset", explain: "Show that you are open to feedback and use it to improve." },
+  { id: 106, q: "Tell me about a time you had to learn a new technology quickly.", correct: "adaptability", explain: "Explain your learning process and how you applied it." },
+  { id: 107, q: "Describe a situation where you had to persuade someone to see your point of view.", correct: "persuasion", explain: "Focus on data, empathy, and clear communication." },
+  { id: 108, q: "Tell me about a time you showed leadership, even if you weren't in a formal leadership role.", correct: "leadership", explain: "Show initiative and how you motivated others." },
+  { id: 109, q: "How do you prioritize your tasks when you have multiple competing deadlines?", correct: "prioritization", explain: "Mention tools or methods like Eisenhower Matrix or simple lists." },
+  { id: 110, q: "Give an example of a time you had to deal with a difficult client or stakeholder.", correct: "stakeholder management", explain: "Focus on active listening and finding common ground." }
+];
+
 export default function App() {
   const [view, setView] = useState<View>('home');
+  const [testMode, setTestMode] = useState<'technical' | 'behavioral'>('technical');
   const [user, setUser] = useState<string | null>(localStorage.getItem('user'));
+  const [theme, setTheme] = useState<'light' | 'dark'>(localStorage.getItem('theme') as 'light' | 'dark' || 'dark');
+  const [searchQuery, setSearchQuery] = useState('');
   const [currentIndex, setCurrentIndex] = useState(0);
   const [currentAnswer, setCurrentAnswer] = useState('');
   const [answers, setAnswers] = useState<Answer[]>([]);
@@ -52,6 +71,17 @@ export default function App() {
   const [isVoiceAssistEnabled, setIsVoiceAssistEnabled] = useState(true);
 
   const t = TRANSLATIONS[language as keyof typeof TRANSLATIONS] || TRANSLATIONS.en;
+
+  useEffect(() => {
+    localStorage.setItem('theme', theme);
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [theme]);
+
+  const toggleTheme = () => setTheme(prev => prev === 'light' ? 'dark' : 'light');
 
   const getAI = () => new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
@@ -103,7 +133,8 @@ export default function App() {
     setView('home');
   };
 
-  const startTest = () => {
+  const startTest = (mode: 'technical' | 'behavioral' = 'technical') => {
+    setTestMode(mode);
     setCurrentIndex(0);
     setAnswers([]);
     setSkippedIndices([]);
@@ -111,8 +142,10 @@ export default function App() {
     setView('test');
   };
 
+  const currentQuestions = testMode === 'technical' ? QUESTIONS : BEHAVIORAL_QUESTIONS;
+
   const processAnswer = async (skipped = false) => {
-    const question = QUESTIONS[currentIndex];
+    const question = currentQuestions[currentIndex];
     
     if (skipped) {
       setSkippedIndices(prev => [...prev, currentIndex]);
@@ -128,23 +161,40 @@ export default function App() {
       return;
     }
 
-    const isCorrect = currentAnswer.toLowerCase().includes(question.correct.toLowerCase());
+    let aiFeedback = "";
+    let isCorrect = testMode === 'technical' 
+      ? currentAnswer.toLowerCase().includes(question.correct.toLowerCase())
+      : false;
+
     setIsAnalyzing(true);
     
-    let aiFeedback = "";
     try {
       const ai = getAI();
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: `Evaluate this interview answer. 
+      const prompt = testMode === 'technical' 
+        ? `Evaluate this technical interview answer. 
         Question: ${question.q}
         Expected Keyword: ${question.correct}
         User Answer: ${currentAnswer}
         Language: ${language}
         If the answer is wrong, clearly state "MISTAKE DETECTED" and explain why. 
-        Provide a very brief (1 sentence) feedback or improvement suggestion.`,
+        Provide a very brief (1 sentence) feedback or improvement suggestion.`
+        : `Evaluate this behavioral interview answer using the STAR method (Situation, Task, Action, Result).
+        Question: ${question.q}
+        User Answer: ${currentAnswer}
+        Language: ${language}
+        Start your response with [PASS] if the answer is good and follows STAR method, or [FAIL] if it's too brief or missing key STAR components.
+        Then provide a very brief (1-2 sentences) feedback on how they can improve their response.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
       });
       aiFeedback = response.text || question.explain;
+      
+      if (testMode === 'behavioral') {
+        isCorrect = aiFeedback.includes('[PASS]');
+        aiFeedback = aiFeedback.replace('[PASS]', '').replace('[FAIL]', '').trim();
+      }
     } catch (error) {
       aiFeedback = question.explain;
     } finally {
@@ -178,9 +228,9 @@ export default function App() {
     let nextIdx = currentIndex + 1;
     
     // If we reached the end, check if there are skipped questions
-    if (nextIdx >= QUESTIONS.length) {
-      const firstSkipped = QUESTIONS.findIndex((_, i) => 
-        !answers.find(a => a.questionId === QUESTIONS[i].id && !a.isSkipped)
+    if (nextIdx >= currentQuestions.length) {
+      const firstSkipped = currentQuestions.findIndex((_, i) => 
+        !answers.find(a => a.questionId === currentQuestions[i].id && !a.isSkipped)
       );
       
       if (firstSkipped !== -1 && firstSkipped !== currentIndex) {
@@ -199,8 +249,9 @@ export default function App() {
       id: Date.now().toString(),
       date: new Date().toLocaleDateString(),
       score,
-      total: QUESTIONS.length,
-      language
+      total: currentQuestions.length,
+      language,
+      mode: testMode
     };
     const updatedHistory = [newHistory, ...history];
     setHistory(updatedHistory);
@@ -230,7 +281,7 @@ export default function App() {
 
   const calculateScore = () => {
     const correctCount = answers.filter(a => a.isCorrect).length;
-    const percentage = Math.round((correctCount / QUESTIONS.length) * 100);
+    const percentage = Math.round((correctCount / currentQuestions.length) * 100);
     let message = t.needsImprovement;
     if (percentage > 80) message = t.excellent;
     else if (percentage > 50) message = t.good;
@@ -241,7 +292,10 @@ export default function App() {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4">
       {/* Navigation */}
-      <nav className="fixed top-0 left-0 right-0 p-6 flex justify-between items-center z-50 bg-slate-950/50 backdrop-blur-md">
+      <nav className={cn(
+        "fixed top-0 left-0 right-0 p-6 flex justify-between items-center z-50 backdrop-blur-md transition-colors duration-500",
+        theme === 'dark' ? "bg-slate-950/50" : "bg-white/50 border-b border-slate-200"
+      )}>
         <div className="flex items-center gap-2 font-bold text-xl tracking-tight cursor-pointer" onClick={() => setView('home')}>
           <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
             <Sparkles className="w-5 h-5 text-white" />
@@ -250,7 +304,10 @@ export default function App() {
         </div>
         
         <div className="flex items-center gap-2 sm:gap-4">
-          <div className="flex items-center gap-1 bg-white/5 rounded-lg p-1">
+          <div className={cn(
+            "flex items-center gap-1 rounded-lg p-1 transition-colors duration-500",
+            theme === 'dark' ? "bg-white/5" : "bg-black/5"
+          )}>
             {(['en', 'es', 'hi'] as Language[]).map(lang => (
               <button 
                 key={lang}
@@ -266,13 +323,25 @@ export default function App() {
           </div>
 
           {user && (
-            <button onClick={() => setView('history')} className="p-2 hover:bg-white/10 rounded-lg transition-colors text-slate-400 hover:text-white">
+            <button 
+              onClick={() => setView('history')} 
+              className={cn(
+                "p-2 rounded-lg transition-colors",
+                theme === 'dark' ? "hover:bg-white/10 text-slate-400 hover:text-white" : "hover:bg-black/5 text-slate-600 hover:text-black"
+              )}
+            >
               <History className="w-5 h-5" />
             </button>
           )}
 
           {user ? (
-            <button onClick={handleLogout} className="p-2 hover:bg-white/10 rounded-lg transition-colors text-slate-400 hover:text-white">
+            <button 
+              onClick={handleLogout} 
+              className={cn(
+                "p-2 rounded-lg transition-colors",
+                theme === 'dark' ? "hover:bg-white/10 text-slate-400 hover:text-white" : "hover:bg-black/5 text-slate-600 hover:text-black"
+              )}
+            >
               <LogOut className="w-5 h-5" />
             </button>
           ) : (
@@ -280,6 +349,20 @@ export default function App() {
               {t.login}
             </button>
           )}
+
+          <motion.button 
+            key={theme}
+            initial={{ scale: 0.5, opacity: 0, rotate: -90 }}
+            animate={{ scale: 1, opacity: 1, rotate: 0 }}
+            onClick={toggleTheme}
+            className={cn(
+              "p-2 rounded-lg transition-all",
+              theme === 'dark' ? "hover:bg-white/10 text-slate-400 hover:text-white" : "hover:bg-black/5 text-slate-600 hover:text-black"
+            )}
+            title={theme === 'light' ? 'Switch to Dark Mode' : 'Switch to Light Mode'}
+          >
+            {theme === 'light' ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5" />}
+          </motion.button>
         </div>
       </nav>
 
@@ -293,9 +376,40 @@ export default function App() {
               exit={{ opacity: 0, y: -20 }}
               className="text-center space-y-8"
             >
-              <h1 className="text-5xl sm:text-7xl font-bold tracking-tighter leading-tight">
+              <motion.h1 
+                className="text-5xl sm:text-7xl font-bold tracking-tighter leading-tight"
+                initial={{ y: 40, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ 
+                  duration: 0.8, 
+                  ease: "easeOut" 
+                }}
+              >
                 {t.title.split(' ').map((word, i) => i === 3 ? <span key={i} className="text-indigo-500">{word} </span> : word + ' ')}
-              </h1>
+              </motion.h1>
+
+              <motion.div
+                initial={{ y: 20, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ delay: 0.3, duration: 0.6 }}
+                className="relative max-w-md mx-auto"
+              >
+                <div className="relative group">
+                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500 group-focus-within:text-indigo-500 transition-colors" />
+                  <input 
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search for modules, tips, or help..."
+                    className={cn(
+                      "w-full pl-12 pr-4 py-4 rounded-2xl border transition-all outline-none text-lg shadow-xl",
+                      theme === 'dark' 
+                        ? "bg-white/5 border-white/10 focus:border-indigo-500/50 focus:bg-white/10" 
+                        : "bg-black/5 border-black/10 focus:border-indigo-500/50 focus:bg-black/10"
+                    )}
+                  />
+                </div>
+              </motion.div>
               <p className="text-xl text-slate-400 max-w-lg mx-auto">
                 {t.subtitle}
               </p>
@@ -419,18 +533,15 @@ export default function App() {
               exit={{ opacity: 0, y: -20 }}
               className="space-y-6"
             >
-              <div className="flex items-center justify-between mb-8">
+              <div className="flex items-center gap-4 mb-8">
+                <button onClick={() => setView('home')} className="p-2 hover:bg-white/10 rounded-lg transition-colors" title="Back to Home">
+                  <ArrowLeft className="w-6 h-6" />
+                </button>
                 <h2 className="text-3xl font-bold">{t.dashboard}</h2>
-                <div className="flex gap-2">
-                  <div className="glass-card px-4 py-2 text-sm flex items-center gap-2">
-                    <Trophy className="w-4 h-4 text-yellow-500" />
-                    <span>Level {Math.floor(history.length / 3) + 1}</span>
-                  </div>
-                </div>
               </div>
               
               <div className="grid grid-cols-1 gap-4">
-                <div className="glass-card p-6 flex flex-col sm:flex-row items-center justify-between gap-6 group hover:border-indigo-500/50 transition-all cursor-pointer" onClick={startTest}>
+                <div className="glass-card p-6 flex flex-col sm:flex-row items-center justify-between gap-6 group hover:border-indigo-500/50 transition-all cursor-pointer" onClick={() => startTest('technical')}>
                   <div className="flex items-center gap-4">
                     <div className="w-12 h-12 bg-indigo-500/20 rounded-xl flex items-center justify-center text-indigo-500">
                       <LayoutDashboard className="w-6 h-6" />
@@ -445,16 +556,19 @@ export default function App() {
                   </button>
                 </div>
                 
-                <div className="glass-card p-6 opacity-50 cursor-not-allowed">
+                <div className="glass-card p-6 flex flex-col sm:flex-row items-center justify-between gap-6 group hover:border-indigo-500/50 transition-all cursor-pointer" onClick={() => startTest('behavioral')}>
                   <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-slate-500/20 rounded-xl flex items-center justify-center text-slate-500">
+                    <div className="w-12 h-12 bg-indigo-500/20 rounded-xl flex items-center justify-center text-indigo-500">
                       <Mic className="w-6 h-6" />
                     </div>
                     <div>
-                      <h3 className="text-xl font-bold">Behavioral Mock</h3>
-                      <p className="text-slate-400">Coming Soon</p>
+                      <h3 className="text-xl font-bold">Behavioural Mock</h3>
+                      <p className="text-slate-400">10 Questions • Soft Skills & STAR Method</p>
                     </div>
                   </div>
+                  <button className="btn-primary group-hover:translate-x-1 transition-transform">
+                    {t.start}
+                  </button>
                 </div>
               </div>
 
@@ -512,7 +626,7 @@ export default function App() {
                         <Calendar className="w-4 h-4 text-indigo-400" />
                         <span className="font-bold">{item.date}</span>
                       </div>
-                      <p className="text-sm text-slate-400">Technical Interview Module</p>
+                      <p className="text-sm text-slate-400">{item.mode === 'behavioral' ? 'Behavioural Mock' : 'Technical Interview Module'}</p>
                     </div>
                     <div className="text-right space-y-1">
                       <div className="text-2xl font-black text-indigo-500">{Math.round((item.score/item.total)*100)}%</div>
@@ -539,7 +653,14 @@ export default function App() {
             >
               <div className="flex justify-between items-center">
                 <div className="flex items-center gap-4">
-                  <span className="text-sm font-mono text-indigo-400">QUESTION {currentIndex + 1} OF {QUESTIONS.length}</span>
+                  <button 
+                    onClick={() => setView('dashboard')} 
+                    className="flex items-center gap-2 px-3 py-1.5 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white transition-colors"
+                  >
+                    <ArrowLeft className="w-4 h-4" />
+                    <span className="text-sm font-medium">Back</span>
+                  </button>
+                  <span className="text-sm font-mono text-indigo-400 uppercase tracking-wider">Question {currentIndex + 1} of {currentQuestions.length}</span>
                   <button 
                     onClick={() => setIsVoiceAssistEnabled(!isVoiceAssistEnabled)}
                     className={cn(
@@ -554,17 +675,17 @@ export default function App() {
                 <div className="w-32 h-2 bg-white/10 rounded-full overflow-hidden">
                   <div 
                     className="h-full bg-indigo-500 transition-all duration-500" 
-                    style={{ width: `${((currentIndex + 1) / QUESTIONS.length) * 100}%` }}
+                    style={{ width: `${((currentIndex + 1) / currentQuestions.length) * 100}%` }}
                   />
                 </div>
               </div>
               
               <div className="space-y-4">
                 <h3 className="text-2xl sm:text-3xl font-bold leading-tight">
-                  {QUESTIONS[currentIndex].q}
+                  {currentQuestions[currentIndex].q}
                 </h3>
                 {isVoiceAssistEnabled && (
-                  <button onClick={() => speak(QUESTIONS[currentIndex].q)} className="text-xs text-indigo-400 flex items-center gap-1 hover:underline">
+                  <button onClick={() => speak(currentQuestions[currentIndex].q)} className="text-xs text-indigo-400 flex items-center gap-1 hover:underline">
                     <Play className="w-3 h-3" /> Repeat Question
                   </button>
                 )}
@@ -614,7 +735,7 @@ export default function App() {
                       </>
                     ) : (
                       <>
-                        {currentIndex === QUESTIONS.length - 1 && skippedIndices.length === 0 ? t.finish : t.next} 
+                        {currentIndex === currentQuestions.length - 1 && skippedIndices.length === 0 ? t.finish : t.next} 
                         <ChevronRight className="w-5 h-5" />
                       </>
                     )}
@@ -629,8 +750,16 @@ export default function App() {
               key="result"
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="glass-card p-12 text-center space-y-8"
+              className="glass-card p-12 text-center space-y-8 relative"
             >
+              <button 
+                onClick={() => setView('dashboard')} 
+                className="absolute top-6 left-6 p-2 hover:bg-white/10 rounded-lg transition-colors"
+                title="Back to Dashboard"
+              >
+                <ArrowLeft className="w-6 h-6" />
+              </button>
+              
               <div className="w-24 h-24 bg-indigo-500/20 rounded-full flex items-center justify-center mx-auto text-indigo-500">
                 <Trophy className="w-12 h-12" />
               </div>
@@ -638,7 +767,7 @@ export default function App() {
               <div className="space-y-2">
                 <h2 className="text-4xl font-bold">{calculateScore().message}</h2>
                 <p className="text-slate-400 text-lg">
-                  You scored <span className="text-white font-bold">{calculateScore().correctCount}</span> out of {QUESTIONS.length}
+                  You scored <span className="text-white font-bold">{calculateScore().correctCount}</span> out of {currentQuestions.length}
                 </p>
               </div>
 
@@ -665,7 +794,12 @@ export default function App() {
               className="space-y-6"
             >
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-3xl font-bold">Review Feedback</h2>
+                <div className="flex items-center gap-4">
+                  <button onClick={() => setView('result')} className="p-2 hover:bg-white/10 rounded-lg" title="Back to Results">
+                    <ArrowLeft className="w-6 h-6" />
+                  </button>
+                  <h2 className="text-3xl font-bold">Review Feedback</h2>
+                </div>
                 <button onClick={() => setView('dashboard')} className="text-slate-400 hover:text-white flex items-center gap-2">
                   <LayoutDashboard className="w-5 h-5" /> {t.dashboard}
                 </button>
@@ -673,7 +807,7 @@ export default function App() {
 
               <div className="space-y-4">
                 {answers.map((answer, i) => {
-                  const question = QUESTIONS.find(q => q.id === answer.questionId);
+                  const question = currentQuestions.find(q => q.id === answer.questionId);
                   const isMistake = !answer.isCorrect && !answer.isSkipped;
                   return (
                     <div key={i} className={cn(
@@ -742,7 +876,10 @@ export default function App() {
         </AnimatePresence>
       </main>
 
-      <footer className="mt-auto py-8 text-slate-500 text-sm">
+      <footer className={cn(
+        "mt-auto py-8 text-sm transition-colors duration-500",
+        theme === 'dark' ? "text-slate-500" : "text-slate-400"
+      )}>
         &copy; 2026 AI Interview Practice Hub • Built with Gemini
       </footer>
     </div>
