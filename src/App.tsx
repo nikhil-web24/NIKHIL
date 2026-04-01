@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
   Mic, 
   Search,
@@ -33,11 +33,16 @@ function cn(...inputs: ClassValue[]) {
 }
 
 const QUESTIONS: Question[] = [
-  { id: 1, q: "What is HTML?", correct: "markup language", explain: "HTML is used to structure web pages." },
-  { id: 2, q: "What is CSS?", correct: "styling", explain: "CSS is used to style web pages." },
-  { id: 3, q: "What is JavaScript?", correct: "programming", explain: "JavaScript adds interactivity." },
-  { id: 4, q: "What is API?", correct: "communication", explain: "API allows communication between systems." },
-  { id: 5, q: "What is database?", correct: "data storage", explain: "Database stores data." }
+  { id: 1, q: "What is HTML?", correct: "HyperText Markup Language", explain: "HTML is the standard markup language for documents designed to be displayed in a web browser." },
+  { id: 2, q: "What is CSS?", correct: "Cascading Style Sheets", explain: "CSS is used for styling the visual presentation of web pages." },
+  { id: 3, q: "What is JavaScript?", correct: "programming language", explain: "JavaScript is a scripting language that enables interactive web pages." },
+  { id: 4, q: "What is React?", correct: "library", explain: "React is a JavaScript library for building user interfaces." },
+  { id: 5, q: "What is a database?", correct: "data storage", explain: "A database is an organized collection of structured information, or data." },
+  { id: 6, q: "What does CPU stand for?", correct: "Central Processing Unit", explain: "The CPU is the primary component of a computer that acts as its 'control center'." },
+  { id: 7, q: "What is the main function of RAM?", correct: "temporary storage", explain: "RAM (Random Access Memory) is a computer's short-term memory." },
+  { id: 8, q: "What is an Operating System?", correct: "software", explain: "An OS is system software that manages computer hardware and software resources." },
+  { id: 9, q: "What is the purpose of a Firewall?", correct: "security", explain: "A firewall is a network security system that monitors and controls incoming and outgoing network traffic." },
+  { id: 10, q: "What is a URL?", correct: "Uniform Resource Locator", explain: "A URL is the address of a unique resource on the Web." }
 ];
 
 const BEHAVIORAL_QUESTIONS: Question[] = [
@@ -46,11 +51,16 @@ const BEHAVIORAL_QUESTIONS: Question[] = [
   { id: 103, q: "Give an example of a time you failed. What did you learn?", correct: "resilience", explain: "Be honest about the failure and emphasize the learning." },
   { id: 104, q: "Tell me about a project you are most proud of.", correct: "achievement", explain: "Highlight your specific contribution and the impact." },
   { id: 105, q: "How do you handle critical feedback?", correct: "growth mindset", explain: "Show that you are open to feedback and use it to improve." },
-  { id: 106, q: "Tell me about a time you had to learn a new technology quickly.", correct: "adaptability", explain: "Explain your learning process and how you applied it." },
-  { id: 107, q: "Describe a situation where you had to persuade someone to see your point of view.", correct: "persuasion", explain: "Focus on data, empathy, and clear communication." },
-  { id: 108, q: "Tell me about a time you showed leadership, even if you weren't in a formal leadership role.", correct: "leadership", explain: "Show initiative and how you motivated others." },
-  { id: 109, q: "How do you prioritize your tasks when you have multiple competing deadlines?", correct: "prioritization", explain: "Mention tools or methods like Eisenhower Matrix or simple lists." },
-  { id: 110, q: "Give an example of a time you had to deal with a difficult client or stakeholder.", correct: "stakeholder management", explain: "Focus on active listening and finding common ground." }
+  { id: 106, q: "What is your greatest strength and how has it helped you?", correct: "self-awareness", explain: "Provide a specific example of how this strength was used." },
+  { id: 107, q: "Where do you see yourself in five years?", correct: "ambition", explain: "Show that you have goals and that this role fits into them." },
+  { id: 108, q: "Why should we hire you?", correct: "value proposition", explain: "Summarize your skills and how they solve the company's problems." },
+  { id: 109, q: "How do you handle stress or pressure?", correct: "coping mechanisms", explain: "Explain your methods for staying calm and productive." },
+  { id: 110, q: "Tell me about a time you went above and beyond for a task.", correct: "initiative", explain: "Show your dedication and willingness to exceed expectations." },
+  { id: 111, q: "What is your favorite hobby and why?", correct: "personality", explain: "Shows you are a well-rounded individual." },
+  { id: 112, q: "If you could travel anywhere in the world, where would it be?", correct: "interests", explain: "Reveals your curiosity and worldview." },
+  { id: 113, q: "How do you define success in your personal life?", correct: "values", explain: "Shows what motivates you outside of work." },
+  { id: 114, q: "What is a book or movie that significantly impacted you?", correct: "inspiration", explain: "Reveals your influences and critical thinking." },
+  { id: 115, q: "How do you balance your work and personal life?", correct: "well-being", explain: "Shows you prioritize health and sustainability." }
 ];
 
 export default function App() {
@@ -94,10 +104,13 @@ export default function App() {
     }
   }, []);
 
-  const requestMicPermission = async () => {
+  const requestMicPermission = async (autoStart = false) => {
     try {
-      await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Stop the stream immediately, we just want to check/request permission
+      stream.getTracks().forEach(track => track.stop());
       setMicPermission('granted');
+      if (autoStart) startVoice();
     } catch (err) {
       setMicPermission('denied');
       console.error("Mic permission denied:", err);
@@ -112,11 +125,8 @@ export default function App() {
     window.speechSynthesis.speak(utterance);
   }, [isVoiceAssistEnabled, language]);
 
-  useEffect(() => {
-    if (view === 'test' && isVoiceAssistEnabled) {
-      speak(QUESTIONS[currentIndex].q);
-    }
-  }, [view, currentIndex, speak, isVoiceAssistEnabled]);
+  const [shuffledQuestions, setShuffledQuestions] = useState<Question[]>([]);
+  const currentQuestions = shuffledQuestions;
 
   const handleLogin = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -133,16 +143,29 @@ export default function App() {
     setView('home');
   };
 
+  useEffect(() => {
+    if (view === 'test' && isVoiceAssistEnabled && currentQuestions.length > 0) {
+      speak(currentQuestions[currentIndex].q);
+    }
+  }, [view, currentIndex, speak, isVoiceAssistEnabled, currentQuestions]);
+
   const startTest = (mode: 'technical' | 'behavioral' = 'technical') => {
     setTestMode(mode);
     setCurrentIndex(0);
     setAnswers([]);
     setSkippedIndices([]);
     setCurrentAnswer('');
+    
+    // Shuffle questions to prevent repetition
+    const pool = mode === 'technical' ? [...QUESTIONS] : [...BEHAVIORAL_QUESTIONS];
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    
+    setShuffledQuestions(pool);
     setView('test');
   };
-
-  const currentQuestions = testMode === 'technical' ? QUESTIONS : BEHAVIORAL_QUESTIONS;
 
   const processAnswer = async (skipped = false) => {
     const question = currentQuestions[currentIndex];
@@ -259,32 +282,62 @@ export default function App() {
     setView('result');
   };
 
+  const [recognitionInstance, setRecognitionInstance] = useState<any>(null);
+
   const startVoice = () => {
+    if (isListening && recognitionInstance) {
+      recognitionInstance.stop();
+      return;
+    }
+
     if (micPermission !== 'granted') {
-      requestMicPermission();
+      requestMicPermission(true);
       return;
     }
 
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) return;
+    if (!SpeechRecognition) {
+      alert("Speech recognition is not supported in this browser. Please use Chrome.");
+      return;
+    }
 
     const recognition = new SpeechRecognition();
+    setRecognitionInstance(recognition);
     recognition.lang = language === 'hi' ? 'hi-IN' : 'en-US';
+    recognition.continuous = false;
+    recognition.interimResults = false;
+
     recognition.onstart = () => setIsListening(true);
-    recognition.onend = () => setIsListening(false);
+    recognition.onend = () => {
+      setIsListening(false);
+      setRecognitionInstance(null);
+    };
+    recognition.onerror = (event: any) => {
+      console.error("Speech recognition error:", event.error);
+      setIsListening(false);
+      setRecognitionInstance(null);
+    };
     recognition.onresult = (event: any) => {
       const transcript = event.results[0][0].transcript;
-      setCurrentAnswer(transcript);
+      setCurrentAnswer(prev => prev + (prev ? ' ' : '') + transcript);
     };
-    recognition.start();
+    
+    try {
+      recognition.start();
+    } catch (err) {
+      console.error("Failed to start recognition:", err);
+      setRecognitionInstance(null);
+    }
   };
 
   const calculateScore = () => {
     const correctCount = answers.filter(a => a.isCorrect).length;
     const percentage = Math.round((correctCount / currentQuestions.length) * 100);
-    let message = t.needsImprovement;
-    if (percentage > 80) message = t.excellent;
-    else if (percentage > 50) message = t.good;
+    
+    let message = "You need more practice.";
+    if (percentage >= 90) message = "Excellent!";
+    else if (percentage >= 75) message = "You did very well!";
+    else if (percentage >= 50) message = "You did well.";
     
     return { correctCount, percentage, message };
   };
@@ -773,6 +826,44 @@ export default function App() {
 
               <div className="text-6xl font-black text-indigo-500">
                 {calculateScore().percentage}%
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-left">
+                <div className="glass-card p-4">
+                  <h4 className="text-sm font-bold text-slate-500 uppercase mb-2">Skipped</h4>
+                  <ul className="space-y-1">
+                    {answers.filter(a => a.isSkipped).length > 0 ? (
+                      answers.filter(a => a.isSkipped).map((a, i) => (
+                        <li key={i} className="text-xs text-slate-300 truncate">• {currentQuestions.find(q => q.id === a.questionId)?.q}</li>
+                      ))
+                    ) : (
+                      <li className="text-xs text-slate-500 italic">None</li>
+                    )}
+                  </ul>
+                </div>
+                <div className="glass-card p-4">
+                  <h4 className="text-sm font-bold text-slate-500 uppercase mb-2">Unanswered</h4>
+                  <ul className="space-y-1">
+                    {currentQuestions.filter(q => !answers.find(a => a.questionId === q.id && !a.isSkipped)).length > 0 ? (
+                      currentQuestions.filter(q => !answers.find(a => a.questionId === q.id && !a.isSkipped)).map((q, i) => (
+                        <li key={i} className="text-xs text-slate-300 truncate">• {q.q}</li>
+                      ))
+                    ) : (
+                      <li className="text-xs text-slate-500 italic">None</li>
+                    )}
+                  </ul>
+                </div>
+                <div className="glass-card p-4">
+                  <h4 className="text-sm font-bold text-slate-500 uppercase mb-2">History</h4>
+                  <div className="space-y-2">
+                    {history.slice(0, 3).map(item => (
+                      <div key={item.id} className="flex justify-between items-center text-xs">
+                        <span className="text-slate-400">{item.date}</span>
+                        <span className="font-bold text-indigo-400">{item.score}/{item.total}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
 
               <div className="flex flex-col sm:flex-row gap-4">
